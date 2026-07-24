@@ -33,81 +33,79 @@ class ModelSpec:
 
 
 def load_model_data() -> tuple[pd.DataFrame, pd.Series]:
-    features = load_csv("dataset_part_3.csv")
+    """Build a numeric feature matrix from the cleaned launch dataset."""
     launch_data = load_csv("dataset_part_2.csv")
-
     if "Class" not in launch_data.columns:
         raise ValueError("dataset_part_2.csv must contain the Class target column")
 
-    target = launch_data["Class"].astype(int).reset_index(drop=True)
-    features = features.reset_index(drop=True)
+    numeric_columns = [
+        "FlightNumber",
+        "PayloadMass",
+        "Flights",
+        "GridFins",
+        "Reused",
+        "Legs",
+        "Block",
+        "ReusedCount",
+    ]
+    categorical_columns = ["Orbit", "LaunchSite", "LandingPad", "Serial"]
+    required = set(numeric_columns + categorical_columns + ["Class"])
+    missing = required.difference(launch_data.columns)
+    if missing:
+        raise ValueError(f"dataset_part_2.csv is missing columns: {sorted(missing)}")
 
-    if len(features) != len(target):
-        raise ValueError(
-            "Feature and target row counts do not match: "
-            f"{len(features)} features versus {len(target)} targets"
-        )
+    model_data = launch_data.copy()
+    for column in ["GridFins", "Reused", "Legs"]:
+        model_data[column] = model_data[column].astype(int)
 
-    non_numeric = features.select_dtypes(exclude="number").columns.tolist()
-    if non_numeric:
-        raise ValueError(f"dataset_part_3.csv contains nonnumeric columns: {non_numeric}")
-
+    features = pd.get_dummies(
+        model_data[numeric_columns + categorical_columns],
+        columns=categorical_columns,
+        drop_first=True,
+        dtype=float,
+    )
+    features = features.fillna(0).astype(float).reset_index(drop=True)
+    target = model_data["Class"].astype(int).reset_index(drop=True)
     return features, target
 
 
 def model_specs() -> list[ModelSpec]:
     return [
         ModelSpec(
-            name="Logistic Regression",
-            estimator=Pipeline(
+            "Logistic Regression",
+            Pipeline(
                 [
                     ("scale", StandardScaler()),
-                    (
-                        "model",
-                        LogisticRegression(
-                            max_iter=5000,
-                            random_state=RANDOM_STATE,
-                        ),
-                    ),
+                    ("model", LogisticRegression(max_iter=5000, random_state=RANDOM_STATE)),
                 ]
             ),
-            parameters={
+            {
                 "model__C": [0.01, 0.1, 1.0, 10.0],
                 "model__solver": ["liblinear", "lbfgs"],
             },
         ),
         ModelSpec(
-            name="Support Vector Machine",
-            estimator=Pipeline(
-                [
-                    ("scale", StandardScaler()),
-                    ("model", SVC()),
-                ]
-            ),
-            parameters={
+            "Support Vector Machine",
+            Pipeline([("scale", StandardScaler()), ("model", SVC())]),
+            {
                 "model__C": [0.1, 1.0, 10.0],
                 "model__kernel": ["linear", "rbf", "sigmoid"],
                 "model__gamma": ["scale", "auto"],
             },
         ),
         ModelSpec(
-            name="Decision Tree",
-            estimator=DecisionTreeClassifier(random_state=RANDOM_STATE),
-            parameters={
+            "Decision Tree",
+            DecisionTreeClassifier(random_state=RANDOM_STATE),
+            {
                 "criterion": ["gini", "entropy"],
                 "max_depth": [2, 4, 6, 8, None],
                 "min_samples_split": [2, 5, 10],
             },
         ),
         ModelSpec(
-            name="K-Nearest Neighbors",
-            estimator=Pipeline(
-                [
-                    ("scale", StandardScaler()),
-                    ("model", KNeighborsClassifier()),
-                ]
-            ),
-            parameters={
+            "K-Nearest Neighbors",
+            Pipeline([("scale", StandardScaler()), ("model", KNeighborsClassifier())]),
+            {
                 "model__n_neighbors": list(range(3, 12)),
                 "model__weights": ["uniform", "distance"],
                 "model__p": [1, 2],
@@ -130,8 +128,8 @@ def evaluate_models(
 
     for spec in model_specs():
         search = GridSearchCV(
-            estimator=spec.estimator,
-            param_grid=spec.parameters,
+            spec.estimator,
+            spec.parameters,
             scoring="accuracy",
             cv=5,
             n_jobs=-1,
@@ -139,7 +137,6 @@ def evaluate_models(
         search.fit(x_train, y_train)
         predictions = search.predict(x_test)
         test_accuracy = accuracy_score(y_test, predictions)
-
         rows.append(
             {
                 "model": spec.name,
@@ -148,7 +145,6 @@ def evaluate_models(
                 "best_parameters": json.dumps(search.best_params_, sort_keys=True),
             }
         )
-
         if test_accuracy > best_test_accuracy:
             best_test_accuracy = test_accuracy
             best_name = spec.name
@@ -170,7 +166,6 @@ def save_accuracy_chart(results: pd.DataFrame) -> None:
         value_name="accuracy",
     )
     plot_data["accuracy"] *= 100
-
     plt.figure(figsize=(10, 5.5))
     sns.barplot(data=plot_data, x="model", y="accuracy", hue="metric")
     plt.ylim(0, 105)
@@ -183,7 +178,11 @@ def save_accuracy_chart(results: pd.DataFrame) -> None:
     plt.close()
 
 
-def save_confusion_matrix(y_test: pd.Series, predictions: pd.Series, model_name: str) -> None:
+def save_confusion_matrix(
+    y_test: pd.Series,
+    predictions: pd.Series,
+    model_name: str,
+) -> None:
     matrix = confusion_matrix(y_test, predictions, labels=[0, 1])
     plt.figure(figsize=(6, 5))
     sns.heatmap(
@@ -211,7 +210,6 @@ def main() -> None:
         random_state=RANDOM_STATE,
         stratify=target,
     )
-
     results, best_name, _, predictions = evaluate_models(
         x_train,
         x_test,
